@@ -1,34 +1,122 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { FaMicrophone, FaCamera, FaStar, FaMapMarkerAlt } from "react-icons/fa";
+import { useNavigate } from "react-router-dom";
 
 function User() {
   const [step, setStep] = useState(1);
   const [problem, setProblem] = useState("");
   const [workerSuggestions, setWorkerSuggestions] = useState([]);
   const [selectedWorker, setSelectedWorker] = useState(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [history, setHistory] = useState([]);
+  const [detectedSkill, setDetectedSkill] = useState(null);
   const [otp, setOtp] = useState("");
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isMicOn, setIsMicOn] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const mediaStreamRef = useRef(null);
+  const videoRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const finalTranscriptRef = useRef("");
+  const navigate = useNavigate();
+
+  const isPlumberRequest = (text) => {
+    if (!text) return false;
+    const t = text.toLowerCase();
+    return t.includes("plumb") || t.includes("tap") || t.includes("leak") || t.includes("pipe");
+  };
+
+  // Try to detect the skill using backend/AI (Gemini). Falls back to simple keyword matching.
+  const detectSkill = async (text) => {
+    if (!text) return null;
+    try {
+      // Expect a backend endpoint that calls Gemini/OpenAI with your API key.
+      const res = await fetch("/api/detect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        // backend should return something like { skill: 'Plumber' }
+        if (json?.skill) return json.skill;
+      }
+    } catch (e) {
+      // ignore and fallback
+      console.warn("AI detect failed, falling back to local heuristics", e);
+    }
+
+    // fallback simple heuristics
+    if (isPlumberRequest(text)) return "Plumber";
+    const t = text.toLowerCase();
+    if (t.includes("electri") || t.includes("switch") || t.includes("wire")) return "Electrician";
+    if (t.includes("clean") || t.includes("deep clean")) return "Cleaner";
+    return null;
+  };
 
   const handleProblemSubmit = () => {
-    setWorkerSuggestions([
-      {
-        id: 1,
-        name: "John Doe",
-        skill: "Electrician",
-        rating: 4.8,
-        distance: "2.1 km",
-        price: "$50 - $70",
-      },
-      {
-        id: 2,
-        name: "Jane Smith",
-        skill: "Plumber",
-        rating: 4.5,
-        distance: "3.5 km",
-        price: "$40 - $60",
-      },
-    ]);
-    setStep(2);
+    (async () => {
+      const skill = await detectSkill(problem);
+      setDetectedSkill(skill);
+
+      // Example worker data. In real app this would come from API.
+      const all = [
+        {
+          id: 1,
+          name: "John Doe",
+          skill: "Electrician",
+          rating: 4.8,
+          distance: "2.1 km",
+          price: "$50 - $70",
+          contact: "+1-555-0123",
+          location: "Downtown",
+          image: null,
+        },
+        {
+          id: 2,
+          name: "Jane Smith",
+          skill: "Plumber",
+          rating: 4.5,
+          distance: "3.5 km",
+          price: "$40 - $60",
+          contact: "+1-555-0456",
+          location: "Uptown",
+          image: null,
+        },
+        {
+          id: 3,
+          name: "Ramesh Kumar",
+          skill: "Plumber",
+          rating: 4.7,
+          distance: "1.2 km",
+          price: "$45 - $65",
+          contact: "+91-98765-43210",
+          location: "Sector 12",
+          image: null,
+        },
+        {
+          id: 4,
+          name: "Aisha Khan",
+          skill: "Plumber",
+          rating: 4.4,
+          distance: "4.0 km",
+          price: "$35 - $55",
+          contact: "+44-7700-900123",
+          location: "Green Park",
+          image: null,
+        },
+      ];
+
+      // If AI detected a skill, filter by it. Otherwise fall back to plumber heuristics like before.
+      const suggestions = skill
+        ? all.filter((w) => w.skill.toLowerCase() === skill.toLowerCase())
+        : isPlumberRequest(problem)
+        ? all.filter((w) => w.skill.toLowerCase() === "plumber")
+        : all;
+      setWorkerSuggestions(suggestions);
+      setStep(2);
+    })();
   };
 
   const handleWorkerAccept = (worker) => {
@@ -55,6 +143,139 @@ function User() {
     setHistory((prev) => prev.filter((item) => item !== historyItem));
   };
 
+  // Camera / microphone helpers
+  const startMedia = async ({ video = false, audio = false } = {}) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
+      mediaStreamRef.current = stream;
+      if (video && videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+      setIsCameraOn(!!video);
+      setIsMicOn(!!audio);
+    } catch (err) {
+      console.error("Media error", err);
+      alert("Cannot access camera/microphone. Please allow permissions.");
+    }
+  };
+
+  const stopMedia = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      try { videoRef.current.pause(); videoRef.current.srcObject = null; } catch(e){}
+    }
+    setIsCameraOn(false);
+    setIsMicOn(false);
+  };
+
+  const stopAudioTracks = () => {
+    if (!mediaStreamRef.current) return;
+    try {
+      mediaStreamRef.current.getAudioTracks().forEach((t) => t.stop());
+      // remove audio tracks from stream object
+      const videoTracks = mediaStreamRef.current.getVideoTracks();
+      if (videoTracks.length === 0) {
+        mediaStreamRef.current = null;
+        if (videoRef.current) { videoRef.current.pause(); videoRef.current.srcObject = null; }
+        setIsCameraOn(false);
+      } else {
+        // keep video tracks
+        const newStream = new MediaStream(videoTracks);
+        mediaStreamRef.current = newStream;
+        if (videoRef.current) videoRef.current.srcObject = newStream;
+      }
+    } catch (e) {
+      console.warn("stopAudioTracks error", e);
+    }
+    setIsMicOn(false);
+  };
+
+  useEffect(() => {
+    return () => stopMedia();
+  }, []);
+
+  // Speech-to-text (live transcription) using Web Speech API (SpeechRecognition)
+  const startTranscription = () => {
+    if (isTranscribing) return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser. Use Chrome/Edge desktop for best support.");
+      return;
+    }
+
+    // Reset interim/final
+    setInterimTranscript("");
+    finalTranscriptRef.current = problem || "";
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = true;
+
+    recognition.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const res = event.results[i];
+        const text = res[0].transcript;
+        if (res.isFinal) {
+          // Append final transcript to the stored final text
+          finalTranscriptRef.current = (finalTranscriptRef.current + " " + text).trim();
+          setInterimTranscript("");
+          // update visible problem with confirmed text
+          setProblem(finalTranscriptRef.current);
+        } else {
+          interim += text;
+        }
+      }
+      if (interim) {
+        setInterimTranscript(interim);
+        // Show final + interim in the textarea to reflect live speech
+        setProblem((finalTranscriptRef.current + " " + interim).trim());
+      }
+    };
+
+    recognition.onerror = (e) => {
+      console.warn("Recognition error", e);
+      // keep running but inform user
+    };
+
+    recognition.onend = () => {
+      setIsTranscribing(false);
+      // ensure final text is applied
+      setProblem(finalTranscriptRef.current);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsTranscribing(true);
+  };
+
+  const stopTranscription = () => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch(e) {}
+      recognitionRef.current = null;
+    }
+    setIsTranscribing(false);
+    setInterimTranscript("");
+    finalTranscriptRef.current = problem || "";
+  };
+
+  // plumber-card navigation helpers
+  const handleNextWorker = () => {
+    if (workerSuggestions.length === 0) return;
+    setCurrentIndex((idx) => (idx + 1) % workerSuggestions.length);
+  };
+
+  const handleAcceptAndPay = (worker) => {
+    // navigate to payment page and pass selected worker & problem
+    navigate("/payment", { state: { worker, problem } });
+  };
+
   return (
     <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center px-6 md:px-16">
       {/* Header */}
@@ -78,7 +299,7 @@ function User() {
 
       {/* Step 1: Problem Description */}
       {step === 1 && (
-        <div className="w-full max-w-3xl bg-white p-8 rounded-lg shadow-lg">
+        <div className="w-full max-w-5xl min-h-[72vh] bg-white p-8 rounded-lg shadow-lg flex flex-col">
           <h2 className="text-3xl font-bold text-[#0b2545] mb-6">
             Describe Your Problem
           </h2>
@@ -86,16 +307,61 @@ function User() {
             placeholder="Describe your problem (e.g., AC not cooling, tap leaking...)"
             value={problem}
             onChange={(e) => setProblem(e.target.value)}
-            className="w-full h-32 px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0b2545] mb-4"
+            className="w-full h-56 md:h-72 px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0b2545] mb-4 resize-none"
           />
           <div className="flex gap-4">
-            <button className="p-3 bg-gray-200 rounded-full hover:bg-gray-300">
-              <FaMicrophone className="text-[#0b2545]" />
-            </button>
-            <button className="p-3 bg-gray-200 rounded-full hover:bg-gray-300">
-              <FaCamera className="text-[#0b2545]" />
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={async () => {
+                  const desiredVideo = !isCameraOn;
+                  const desiredAudio = isMicOn;
+                  await startMedia({ video: desiredVideo, audio: desiredAudio });
+                }}
+                className={`p-3 rounded-full ${isCameraOn ? "bg-green-200" : "bg-gray-200 hover:bg-gray-300"}`}
+                title={isCameraOn ? "Turn off camera" : "Turn on camera"}
+              >
+                <FaCamera className="text-[#0b2545]" />
+              </button>
+
+              <button
+                onClick={async () => {
+                  const desiredAudio = !isMicOn;
+                  const desiredVideo = isCameraOn;
+                  if (desiredAudio) {
+                    // request microphone and start transcription
+                    await startMedia({ video: desiredVideo, audio: true });
+                    startTranscription();
+                    setIsMicOn(true);
+                  } else {
+                    // stop transcription and audio only
+                    stopTranscription();
+                    stopAudioTracks();
+                  }
+                }}
+                className={`p-3 rounded-full ${isTranscribing ? "bg-red-200 animate-pulse" : isMicOn ? "bg-green-200" : "bg-gray-200 hover:bg-gray-300"}`}
+                title={isMicOn ? "Turn off mic" : "Turn on mic"}
+              >
+                <FaMicrophone className="text-[#0b2545]" />
+              </button>
+            </div>
           </div>
+          {/* Video preview */}
+          {isCameraOn && (
+            <div className="mt-4">
+              <video ref={videoRef} className="w-full h-56 md:h-64 object-cover rounded-md border" autoPlay muted />
+              <div className="text-sm text-gray-500 mt-2">Camera is on — preview shown above. Click camera button again to stop.</div>
+            </div>
+          )}
+          {/* Live transcription badge & interim text */}
+          {isTranscribing && (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="inline-block w-3 h-3 bg-red-600 rounded-full animate-pulse" />
+              <span className="text-sm text-red-600 font-medium">Recording...</span>
+            </div>
+          )}
+          {interimTranscript && (
+            <div className="mt-2 text-sm text-gray-500 italic">Listening: {interimTranscript}</div>
+          )}
           <button
             onClick={handleProblemSubmit}
             className="bg-[#0b2545] text-white px-6 py-3 rounded-md hover:bg-[#14365b] font-semibold mt-4"
@@ -149,6 +415,37 @@ function User() {
               </div>
             ))}
           </div>
+          {/* If this was a plumber request, show bottom plumber card with cycle/next/accept */}
+          {isPlumberRequest(problem) && workerSuggestions.length > 0 && (
+            <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 w-full max-w-3xl bg-white p-4 rounded-lg shadow-2xl border">
+              {(() => {
+                const w = workerSuggestions[currentIndex % workerSuggestions.length];
+                return (
+                  <div className="flex items-center gap-4">
+                    <div className="w-20 h-20 bg-gray-200 rounded-md shrink-0" />
+                    <div className="flex-1">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h3 className="text-lg font-semibold text-[#0b2545]">{w.name}</h3>
+                          <p className="text-sm text-gray-600">{w.skill} • {w.location}</p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-yellow-500 flex items-center gap-1"><FaStar /> <span>{w.rating}</span></div>
+                          <div className="text-gray-600 text-sm">{w.price}</div>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-sm text-gray-600">Contact: <strong>{w.contact}</strong></div>
+                      <div className="mt-3 flex gap-3">
+                        <button onClick={() => handleAcceptAndPay(w)} className="bg-green-600 text-white px-4 py-2 rounded-md font-semibold">Accept</button>
+                        <button onClick={handleNextWorker} className="bg-gray-200 text-[#0b2545] px-4 py-2 rounded-md font-semibold">Next</button>
+                        <button onClick={() => setWorkerSuggestions(prev => prev.filter(x => x.id !== w.id))} className="bg-red-500 text-white px-4 py-2 rounded-md font-semibold">Reject</button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          )}
         </div>
       )}
 

@@ -50,10 +50,10 @@ function App() {
             you with trusted local professionals in seconds using AI-powered matching.
           </p>
           <div className="flex gap-4">
-            <button className="bg-[#0b2545] text-white px-5 py-3 rounded-md hover:bg-[#14365b]">
+            <button onClick={()=>navigate("/user")} className="bg-[#0b2545] text-white px-5 py-3 rounded-md hover:bg-[#14365b]">
                Find a Worker
             </button>
-            <button className="bg-gray-200 text-[#0b2545] px-5 py-3 rounded-md hover:bg-gray-300">
+            <button onClick={() => navigate("/sign")} className="bg-gray-200 text-[#0b2545] px-5 py-3 rounded-md hover:bg-gray-300">
                Join as a Worker
             </button>
           </div>
@@ -133,7 +133,7 @@ function App() {
           Join EzyWork today and experience effortless service at your doorstep.
         </p>
         <div className="flex justify-center gap-4">
-          <button className="bg-[#0b2545] text-white px-5 py-3 rounded-md hover:bg-[#14365b]">
+          <button onClick={() => navigate("/sign")} className="bg-[#0b2545] text-white px-5 py-3 rounded-md hover:bg-[#14365b]">
             🚀 Get Started
           </button>
           <button className="bg-gray-200 text-[#0b2545] px-5 py-3 rounded-md hover:bg-gray-300">
