@@ -6,10 +6,35 @@ function Sign() {
   const [role, setRole] = useState("User");
   const navigate = useNavigate();
 
+  const [workerDetails, setWorkerDetails] = useState({
+    fullName: "",
+    location: "",
+    yearsOfExperience: "",
+    typeOfWork: [],
+  });
+
+  const handleWorkerDetailsChange = (e) => {
+    const { name, value } = e.target;
+    setWorkerDetails((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleTypeOfWorkChange = (e) => {
+    const options = Array.from(e.target.selectedOptions, (option) => option.value);
+    setWorkerDetails((prev) => ({
+      ...prev,
+      typeOfWork: options,
+    }));
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (role === "User") {
       navigate("/user");
+    } else if (role === "Worker" && isSignUp) {
+      navigate("/worker-details");
     } else if (role === "Worker") {
       navigate("/worker");
     }
@@ -88,6 +113,9 @@ function Sign() {
             <input
               type="text"
               placeholder="Full Name"
+              name="fullName"
+              value={workerDetails.fullName}
+              onChange={handleWorkerDetailsChange}
               className="px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0b2545]"
             />
           )}

@@ -6,6 +6,7 @@ import App from "./App.jsx";
 import Sign from "./Sign.jsx";
 import User from "./User.jsx";
 import Worker from "./Worker.jsx";
+import WorkerDetails from "./WorkerDetails"; // Import WorkerDetails component
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
@@ -15,6 +16,7 @@ createRoot(document.getElementById("root")).render(
         <Route path="/sign" element={<Sign />} />
         <Route path="/user" element={<User />} />
         <Route path="/worker" element={<Worker />} />
+        <Route path="/worker-details" element={<WorkerDetails />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>

@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom"; // Added for navigation
+import { Routes, Route } from "react-router-dom"; // Added for routing
 import "./App.css";
 import WorkerImage from "../Photos/Worker.png";
+import WorkerDetails from "./WorkerDetails"; // Import WorkerDetails component
 
 function App() {
   const [email, setEmail] = useState("");
@@ -139,6 +141,12 @@ function App() {
           </button>
         </div>
       </footer>
+
+      {/* Routes */}
+      <Routes>
+        <Route path="/worker-details" element={<WorkerDetails />} />
+        {/* Add other routes here */}
+      </Routes>
     </div>
   );
 }
