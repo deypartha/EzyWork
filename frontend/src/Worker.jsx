@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Users,
   Wallet,
@@ -93,7 +93,14 @@ export default function WorkerDashboard() {
   const [upiId, setUpiId] = useState("");
   const [fraudReportOpen, setFraudReportOpen] = useState(false);
   const [performanceRange, setPerformanceRange] = useState("weekly");
+  const [workerLocation, setWorkerLocation] = useState({
+    latitude: null,
+    longitude: null,
+    city: null,
+    country: null,
+  });
 
+  // Define menuItems array
   const menuItems = [
     { key: "job", icon: <Users size={18} />, label: "Job Management" },
     { key: "wallet", icon: <Wallet size={18} />, label: "Wallet & Earnings" },
@@ -102,6 +109,47 @@ export default function WorkerDashboard() {
     { key: "security", icon: <ShieldAlert size={18} />, label: "Security & Communication" },
     { key: "history", icon: <Briefcase size={18} />, label: "Work History" },
   ];
+
+  // Fetch worker's location on dashboard load
+  useEffect(() => {
+    const fetchLocation = () => {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            const locationData = await fetchCityAndCountry(latitude, longitude);
+            setWorkerLocation({
+              latitude,
+              longitude,
+              city: locationData.city,
+              country: locationData.country,
+            });
+          },
+          (error) => {
+            console.error("Unable to fetch location:", error);
+          }
+        );
+      } else {
+        console.error("Geolocation is not supported by this browser.");
+      }
+    };
+
+    fetchLocation();
+  }, []);
+
+  // Fetch city and country using reverse geocoding API
+  const fetchCityAndCountry = async (latitude, longitude) => {
+    try {
+      const response = await fetch(
+        `https://geocode.xyz/${latitude},${longitude}?geoit=json`
+      );
+      const data = await response.json();
+      return { city: data.city || "Unknown", country: data.country || "Unknown" };
+    } catch (error) {
+      console.error("Error fetching city and country:", error);
+      return { city: "Unknown", country: "Unknown" };
+    }
+  };
 
   // Mark job as completed: open OTP modal
   function handleEndJob(jobId) {
@@ -204,6 +252,14 @@ export default function WorkerDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <div className="text-sm text-gray-600">Status: <strong>{online ? "Available" : "Offline"}</strong></div>
+            <div className="text-sm text-gray-600">
+              Location:{" "}
+              <strong>
+                {workerLocation.city}, {workerLocation.country} (
+                {workerLocation.latitude?.toFixed(2)},{" "}
+                {workerLocation.longitude?.toFixed(2)})
+              </strong>
+            </div>
             <button onClick={() => setActiveSection("wallet")} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md">Open Wallet</button>
             <button onClick={() => setWithdrawModalOpen(true)} className="bg-white border px-3 py-2 rounded-md">Withdraw</button>
           </div>
@@ -211,7 +267,7 @@ export default function WorkerDashboard() {
 
         {/* SECTION RENDER */}
         {activeSection === "job" && (
-          <JobSection history={history} onEndJob={handleEndJob} setHistory={setHistory} />
+          <JobSection history={history} onEndJob={handleEndJob} setHistory={setHistory} workerLocation={workerLocation} />
         )}
         {activeSection === "wallet" && (
           <WalletSection onWithdrawClick={() => setWithdrawModalOpen(true)} />
@@ -256,17 +312,9 @@ export default function WorkerDashboard() {
 }
 
 /* ------------------ Job Section ------------------ */
-function JobSection({ history, onEndJob, setHistory }) {
-  // Simulated active jobs (pending)
+function JobSection({ history, onEndJob, setHistory, workerLocation }) {
   const activeJobs = history.filter((h) => h.status === "pending");
-
-  function acceptJob(id) {
-    setHistory((h) => h.map((j) => (j.id === id ? { ...j, status: "accepted" } : j)));
-  }
-
-  function rejectJob(id) {
-    setHistory((h) => h.map((j) => (j.id === id ? { ...j, status: "rejected" } : j)));
-  }
+  const nextJob = activeJobs[0]; // Assuming the first pending job is the next job
 
   return (
     <div className="space-y-6">
@@ -300,8 +348,8 @@ function JobSection({ history, onEndJob, setHistory }) {
                   {/* Accept/Reject */}
                   {job.status === "pending" && (
                     <>
-                      <button onClick={() => acceptJob(job.id)} className="px-3 py-1 rounded-md bg-green-600 text-white text-sm">Accept</button>
-                      <button onClick={() => rejectJob(job.id)} className="px-3 py-1 rounded-md bg-red-50 text-red-600 border">Reject</button>
+                      <button onClick={() => setHistory((h) => h.map((j) => (j.id === job.id ? { ...j, status: "accepted" } : j)))} className="px-3 py-1 rounded-md bg-green-600 text-white text-sm">Accept</button>
+                      <button onClick={() => setHistory((h) => h.map((j) => (j.id === job.id ? { ...j, status: "rejected" } : j)))} className="px-3 py-1 rounded-md bg-red-50 text-red-600 border">Reject</button>
                     </>
                   )}
 
@@ -317,30 +365,35 @@ function JobSection({ history, onEndJob, setHistory }) {
           </div>
         </div>
 
-        {/* Quick Map / Details */}
-        <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="font-semibold mb-2">Job Quick View</h3>
-          <p className="text-sm text-gray-500 mb-4">Tap a job to see details, start navigation or view photos.</p>
-          <div className="bg-gray-50 p-3 rounded-md text-sm">
-            <div className="flex items-center gap-2 mb-2"><MapPin size={16} /> <strong>Nearest job:</strong> AC Repair • 2.4 km</div>
-            <div className="flex items-center gap-2 mb-2"><Phone size={16} /> Customer call available</div>
-            <div className="flex gap-2 mt-4">
-              <button className="px-3 py-2 rounded-md bg-green-600 text-white">Navigate</button>
-              <button className="px-3 py-2 rounded-md bg-white border">View Photos</button>
+        {/* Next Job */}
+        {nextJob && (
+          <div className="bg-white p-6 rounded-xl shadow-sm">
+            <h3 className="font-semibold mb-2">Next Job</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              {nextJob.title} • {nextJob.customer} • {nextJob.location}
+            </p>
+            <div className="flex gap-3">
+              <button className="px-4 py-2 bg-green-600 text-white rounded-md">
+                View Photos
+              </button>
+              <button className="px-4 py-2 bg-blue-600 text-white rounded-md">
+                Navigate
+              </button>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Quick Controls */}
+      {/* Live Location */}
       <div className="bg-white p-6 rounded-xl shadow-sm">
-        <h4 className="font-semibold mb-3">Quick Controls</h4>
-        <div className="flex items-center gap-3 flex-wrap">
-          <button className="px-3 py-2 bg-green-600 text-white rounded-md">Auto Accept</button>
-          <button className="px-3 py-2 bg-yellow-100 text-yellow-800 rounded-md">Pause Matching</button>
-          <button className="px-3 py-2 bg-white border rounded-md">Filter: Nearby</button>
-          <button className="px-3 py-2 bg-white border rounded-md">Sort: Highest Paying</button>
-        </div>
+        <h3 className="font-semibold mb-2">Worker Live Location</h3>
+        <p className="text-sm text-gray-500">
+          Latitude: {workerLocation.latitude?.toFixed(2)}, Longitude:{" "}
+          {workerLocation.longitude?.toFixed(2)}
+        </p>
+        <p className="text-sm text-gray-500">
+          Location: {workerLocation.city}, {workerLocation.country}
+        </p>
       </div>
     </div>
   );
