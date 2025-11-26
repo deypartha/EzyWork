@@ -15,10 +15,14 @@ function User() {
   const [isMicOn, setIsMicOn] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [detectedLanguage, setDetectedLanguage] = useState(null);
   const mediaStreamRef = useRef(null);
   const videoRef = useRef(null);
   const recognitionRef = useRef(null);
   const finalTranscriptRef = useRef("");
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
   const navigate = useNavigate();
 
   const isPlumberRequest = (text) => {
@@ -194,6 +198,71 @@ function User() {
     setIsMicOn(false);
   };
 
+  // Recording helpers: start MediaRecorder and collect chunks
+  const startRecording = () => {
+    if (!mediaStreamRef.current) return;
+    try {
+      audioChunksRef.current = [];
+      const options = { mimeType: "audio/webm" };
+      const mr = new MediaRecorder(mediaStreamRef.current, options);
+      mr.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        // upload and translate
+        await uploadAudioForTranslation(blob);
+      };
+      mediaRecorderRef.current = mr;
+      mr.start();
+    } catch (e) {
+      console.warn("startRecording failed", e);
+    }
+  };
+
+  const stopRecording = () => {
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+    } catch (e) {
+      console.warn("stopRecording error", e);
+    }
+    mediaRecorderRef.current = null;
+  };
+
+  const uploadAudioForTranslation = async (blob) => {
+    setIsUploading(true);
+    setDetectedLanguage(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", blob, "audio.webm");
+      // POST to your backend which should perform speech-to-text + translate to English
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "Transcription failed");
+      }
+      const json = await res.json();
+      // expect { translated_text: '...', detected_language: 'Hindi' }
+      const translated = json.translated_text || json.text || "";
+      const lang = json.detected_language || json.language || null;
+      if (translated) {
+        setProblem(translated);
+        finalTranscriptRef.current = translated;
+      }
+      setDetectedLanguage(lang);
+    } catch (e) {
+      console.error("uploadAudioForTranslation error", e);
+      alert("Translation failed: " + (e.message || e));
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   useEffect(() => {
     return () => stopMedia();
   }, []);
@@ -328,13 +397,15 @@ function User() {
                   const desiredAudio = !isMicOn;
                   const desiredVideo = isCameraOn;
                   if (desiredAudio) {
-                    // request microphone and start transcription
+                    // request microphone and start transcription + recording
                     await startMedia({ video: desiredVideo, audio: true });
                     startTranscription();
+                    startRecording();
                     setIsMicOn(true);
                   } else {
-                    // stop transcription and audio only
+                    // stop transcription, recording and audio only
                     stopTranscription();
+                    stopRecording();
                     stopAudioTracks();
                   }
                 }}
@@ -357,6 +428,10 @@ function User() {
             <div className="mt-3 flex items-center gap-2">
               <span className="inline-block w-3 h-3 bg-red-600 rounded-full animate-pulse" />
               <span className="text-sm text-red-600 font-medium">Recording...</span>
+              {isUploading && <span className="ml-3 text-sm text-gray-600">Translating...</span>}
+              {detectedLanguage && !isUploading && (
+                <span className="ml-3 text-sm text-gray-700">Detected: <strong>{detectedLanguage}</strong></span>
+              )}
             </div>
           )}
           {interimTranscript && (
